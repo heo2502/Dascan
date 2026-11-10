@@ -113,9 +113,24 @@ async function baseline(id) { return { answer: await latestAnswer(id), page: awa
 
 function progress(payload) { mainWindow?.webContents.send('debate-progress', payload); }
 
+async function resetDebateChats() {
+  await Promise.all(SERVICES.map(service => new Promise((resolve, reject) => {
+    const view = views.get(service.id);
+    if (!view) { reject(new Error(`${service.id} 화면을 찾지 못했습니다.`)); return; }
+    const timeout = setTimeout(() => { cleanup(); reject(new Error(`${service.id} 새 대화 준비 시간이 초과되었습니다.`)); }, 30000);
+    const done = () => { cleanup(); resolve(); };
+    const cleanup = () => { clearTimeout(timeout); view.webContents.removeListener('did-finish-load', done); };
+    view.webContents.once('did-finish-load', done);
+    view.webContents.loadURL(service.url).catch(error => { cleanup(); reject(error); });
+  })));
+  await wait(1500);
+}
+
 async function runDebate(topic, maxRounds) {
   debateCancelled = false;
   const history = [];
+  progress({ state: 'running', round: 0, message: '세 AI의 기존 문맥을 지우고 새 토론방을 준비합니다.' });
+  await resetDebateChats();
   progress({ state: 'running', round: 1, message: '1라운드: 찬성·반대의 첫 주장을 요청합니다.' });
   const beforePro = await baseline('chatgpt');
   const beforeCon = await baseline('gemini');
