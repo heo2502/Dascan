@@ -27,7 +27,7 @@ npm run dev
 npm run dist
 ```
 
-결과물은 `release/` 폴더에 생성됩니다.
+설치 파일은 `release/Dascan-Setup-버전-x64.exe`로 생성됩니다.
 
 ## 사용 방법
 

@@ -10,7 +10,7 @@
     "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron . --dev\"",
     "build": "vite build",
     "start": "electron .",
-    "dist": "npm run build && electron-builder --win nsis portable"
+    "dist": "npm run build && electron-builder --win nsis"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
@@ -30,7 +30,7 @@
     "asar": true,
     "files": ["dist/**/*", "electron/**/*", "package.json"],
     "directories": { "output": "release" },
-    "win": { "target": ["nsis", "portable"], "artifactName": "Dascan-${version}-${arch}.${ext}" },
+    "win": { "target": ["nsis"], "artifactName": "Dascan-Setup-${version}-${arch}.${ext}" },
     "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true }
   }
 }
