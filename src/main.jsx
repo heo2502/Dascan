@@ -14,31 +14,6 @@ const MODES = [
   {id:'shopping', icon:'🛍️', label:'쇼핑'},
 ];
 
-function editorScript(text) {
-  return `(() => {
-    const text=${JSON.stringify(text)};
-    const visible=e=>e && e.offsetParent!==null && !e.disabled;
-    const candidates=[...document.querySelectorAll('textarea, [contenteditable="true"], [role="textbox"]')].filter(visible);
-    const el=candidates.find(e=>/prompt|message|chat|ask|질문|메시지/i.test((e.getAttribute('placeholder')||'')+' '+(e.getAttribute('aria-label')||''))) || candidates.at(-1);
-    if(!el) return {ok:false,error:'입력창을 찾지 못했습니다. 로그인 또는 새 대화 화면을 확인하세요.'};
-    el.focus();
-    if(el.tagName==='TEXTAREA' || el.tagName==='INPUT') {
-      const setter=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el),'value')?.set;
-      setter ? setter.call(el,text) : el.value=text;
-      el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true}));
-    } else {
-      el.textContent=text; el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:text}));
-    }
-    const form=el.closest('form');
-    const buttons=[...(form||document).querySelectorAll('button')].filter(visible);
-    const send=buttons.find(b=>/send|submit|보내기|전송/i.test((b.getAttribute('aria-label')||'')+' '+(b.title||''))) || buttons.find(b=>b.type==='submit');
-    if(send){send.click();return {ok:true,sent:true};}
-    el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true}));
-    el.dispatchEvent(new KeyboardEvent('keyup',{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true}));
-    return {ok:true,sent:true};
-  })()`;
-}
-
 function App(){
   const [mode,setMode]=useState('all');
   const [active,setActive]=useState('all');
@@ -59,7 +34,7 @@ function App(){
     if(!text.trim()) return;
     setNotice('AI에 질문을 보내는 중…');
     const results=await Promise.all(ids.map(async id=>{
-      try { const result=await window.dascan.send({id,script:editorScript(text)}); return [id,result]; }
+      try { const result=await window.dascan.send({id,text}); return [id,result]; }
       catch(e){ return [id,{ok:false,error:e.message}]; }
     }));
     const failed=results.filter(([,r])=>!r?.ok);
