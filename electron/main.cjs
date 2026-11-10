@@ -60,6 +60,12 @@ async function sendPrompt(id, text) {
       view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'ENTER' });
       view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'ENTER' });
     }
+    await wait(500);
+    const stillFilled = await view.webContents.executeJavaScript(`(() => { const selectors=${JSON.stringify(editorSelectors[id] || [])}; const visible=e=>e&&e.offsetParent!==null&&!e.disabled; for(const selector of selectors){const el=[...document.querySelectorAll(selector)].find(visible);if(el){return ((el.value||el.innerText||el.textContent||'').trim().length>20)}} return false })()`, true);
+    if (stillFilled) {
+      view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'ENTER' });
+      view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'ENTER' });
+    }
     return { ok: true, sent: true, method: clicked ? 'button' : 'enter' };
   } catch (error) { return { ok: false, error: error.message }; }
 }
@@ -91,6 +97,22 @@ function pageDifference(before, current, prompt) {
   return [...new Set(added)].join('\n').slice(-8000);
 }
 
+function sanitizeDebateAnswer(text) {
+  if (!text) return '';
+  const markers = [
+    /다음\s*(토론\s*)?단계(를|를\s*선택|를\s*골라|는)?/i,
+    /원하시는\s*(다음\s*)?(방향|단계)/i,
+    /아래\s*선택지/i,
+    /choose\s+the\s+next/i,
+  ];
+  let cut = text.length;
+  for (const marker of markers) {
+    const match = marker.exec(text);
+    if (match && match.index > 80) cut = Math.min(cut, match.index);
+  }
+  return text.slice(0, cut).trim();
+}
+
 async function waitForAnswer(id, baseline, prompt, timeoutMs = 150000) {
   const started = Date.now();
   let last = ''; let stable = 0;
@@ -103,7 +125,7 @@ async function waitForAnswer(id, baseline, prompt, timeoutMs = 150000) {
     if (current && current !== baseline.answer && current.length > 40) {
       if (current === last) stable += 1; else stable = 0;
       last = current.trim();
-      if (stable >= 2 && !(await isGenerating(id))) return current;
+      if (stable >= 2 && !(await isGenerating(id))) return sanitizeDebateAnswer(current);
     }
   }
   throw new Error(`${id}의 답변 대기 시간이 초과되었습니다.`);
@@ -135,7 +157,7 @@ async function runDebate(topic, maxRounds) {
   const beforePro = await baseline('chatgpt');
   const beforeCon = await baseline('gemini');
   const proOpening = `당신은 실제 토론의 찬성 측 토론자입니다. 주제: “${topic}”\n이 토론은 여러 라운드로 진행됩니다. 지금은 결론을 내리지 말고, 명확한 입장과 근거·사례·예상 반론을 포함한 500자 안팎의 첫 주장을 하세요. 상대를 존중하되 논리적으로 설득하세요.`;
-  const conOpening = `당신은 실제 토론의 반대 측 토론자입니다. 주제: “${topic}”\n이 토론은 여러 라운드로 진행됩니다. 지금은 결론을 내리지 말고, 명확한 입장과 근거·사례·예상 반론을 포함한 500자 안팎의 첫 주장을 하세요. 상대를 존중하되 논리적으로 설득하세요.`;
+  const conOpening = `당신은 실제 토론의 반대 측 토론자입니다. 주제: “${topic}”\n이 토론은 여러 라운드로 진행됩니다. 지금은 결론을 내리지 말고, 명확한 입장과 근거·사례·예상 반론을 포함한 500자 안팎의 첫 주장을 하세요. 상대를 존중하되 논리적으로 설득하세요. 사용자에게 다음 단계를 선택하라고 묻지 말고 반대 측 발언만 완성하세요.`;
   const [sentPro, sentCon] = await Promise.all([
     sendPrompt('chatgpt', proOpening),
     sendPrompt('gemini', conOpening),
@@ -166,7 +188,7 @@ async function runDebate(topic, maxRounds) {
     const beforeNextPro = await baseline('chatgpt');
     const beforeNextCon = await baseline('gemini');
     const proRebuttal = `토론 주제: “${topic}”\n당신은 계속 찬성 측입니다. 상대(반대 측)의 직전 발언:\n${current.con}\n\n사회자의 평가와 찬성 측 질문:\n${moderator}\n\n상대의 가장 강한 근거를 먼저 정확히 요약한 뒤 직접 반박하세요. 자신의 직전 주장을 반복하거나 독자적인 최종 결론을 내리지 마세요. 자신의 약점 하나를 인정하고 새로운 보완 논거를 포함해 500자 안팎으로 답하세요.`;
-    const conRebuttal = `토론 주제: “${topic}”\n당신은 계속 반대 측입니다. 상대(찬성 측)의 직전 발언:\n${current.pro}\n\n사회자의 평가와 반대 측 질문:\n${moderator}\n\n상대의 가장 강한 근거를 먼저 정확히 요약한 뒤 직접 반박하세요. 자신의 직전 주장을 반복하거나 독자적인 최종 결론을 내리지 마세요. 자신의 약점 하나를 인정하고 새로운 보완 논거를 포함해 500자 안팎으로 답하세요.`;
+    const conRebuttal = `토론 주제: “${topic}”\n당신은 계속 반대 측입니다. 상대(찬성 측)의 직전 발언:\n${current.pro}\n\n사회자의 평가와 반대 측 질문:\n${moderator}\n\n상대의 가장 강한 근거를 먼저 정확히 요약한 뒤 직접 반박하세요. 자신의 직전 주장을 반복하거나 독자적인 최종 결론을 내리지 마세요. 자신의 약점 하나를 인정하고 새로운 보완 논거를 포함해 500자 안팎으로 답하세요. 사용자에게 선택지나 다음 단계 질문을 제시하지 말고 재반박 발언만 완성하세요.`;
     const [nextProSent, nextConSent] = await Promise.all([
       sendPrompt('chatgpt', proRebuttal),
       sendPrompt('gemini', conRebuttal),
