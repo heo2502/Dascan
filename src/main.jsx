@@ -21,9 +21,12 @@ function App(){
   const [statuses,setStatuses]=useState(Object.fromEntries(SERVICES.map(s=>[s.id,'준비 중'])));
   const [notice,setNotice]=useState('');
   const [debateTopic,setDebateTopic]=useState('');
+  const [debateRounds,setDebateRounds]=useState(3);
+  const [debateState,setDebateState]=useState({state:'idle',message:''});
   const refs=useRef({});
 
   useEffect(()=>window.dascan?.onReady(id=>setStatuses(v=>({...v,[id]:'준비'}))),[]);
+  useEffect(()=>window.dascan?.onDebateProgress(progress=>setDebateState(progress)),[]);
   useLayoutEffect(()=>{
     const update=()=>window.dascan?.layout(SERVICES.flatMap(s=>{const el=refs.current[s.id];if(!el||el.offsetParent===null)return[];const r=el.getBoundingClientRect();return[{id:s.id,x:r.x,y:r.y,width:r.width,height:r.height}]}));
     update();const observer=new ResizeObserver(update);observer.observe(document.body);window.addEventListener('resize',update);
@@ -56,10 +59,12 @@ function App(){
     window.open(`https://www.daangn.com/kr/buy-sell/?search=${q}`);
     setPrompt('');
   };
-  const startDebate=()=>{
+  const startDebate=async()=>{
     if(!debateTopic.trim()) return;
-    const roles={chatgpt:'당신은 찬성 측입니다. 핵심 근거 3개로 주장하세요.',gemini:'당신은 반대 측입니다. 찬성 측이 제기할 법한 주장도 반박하며 근거 3개로 답하세요.',claude:'당신은 중립 사회자입니다. 쟁점, 판단 기준, 잠정 결론을 구조화하세요.'};
-    SERVICES.forEach(s=>sendTo([s.id],`토론 주제: ${debateTopic}\n${roles[s.id]}`));
+    setActive('all');
+    setDebateState({state:'running',message:'토론을 준비하고 있습니다.'});
+    const result=await window.dascan.startDebate({topic:debateTopic,maxRounds:debateRounds});
+    if(!result.ok)setDebateState({state:'error',message:result.error});
   };
   const crossCheck=()=>sendTo(SERVICES.map(s=>s.id),'현재 대화에서 당신이 제시한 답변을 스스로 교차검토하세요. 사실 오류, 빠진 관점, 불확실한 부분을 구분하고 개선된 최종 답을 제시하세요.');
   const synthesize=()=>sendTo(SERVICES.map(s=>s.id),'현재 대화의 답변을 다시 검토한 뒤, 핵심 결론·공통점·차이점·실행 권고를 간결하게 종합하세요.');
@@ -84,7 +89,7 @@ function App(){
         <button className="ghost" title="종합" onClick={synthesize}>⑂ 종합</button>
         <button className="send" onClick={mode==='shopping'?shop:submit}>↑</button>
       </section>
-      {mode==='debate'&&<section className="debatebar"><b>AI 토론</b><input value={debateTopic} onChange={e=>setDebateTopic(e.target.value)} placeholder="토론 주제를 입력하세요"/><button onClick={startDebate}>토론 시작</button></section>}
+      {mode==='debate'&&<><section className="debatebar"><b>AI 토론</b><input value={debateTopic} onChange={e=>setDebateTopic(e.target.value)} placeholder="토론 주제를 입력하세요" disabled={debateState.state==='running'}/><label>최대 <select value={debateRounds} onChange={e=>setDebateRounds(Number(e.target.value))} disabled={debateState.state==='running'}><option value="2">2라운드</option><option value="3">3라운드</option><option value="4">4라운드</option><option value="5">5라운드</option></select></label>{debateState.state==='running'?<button className="stop" onClick={()=>window.dascan.cancelDebate()}>중지</button>:<button onClick={startDebate}>토론 시작</button>}</section><div className={`debateprogress ${debateState.state}`}>{debateState.message||'ChatGPT는 찬성, Gemini는 반대, Claude는 사회자를 맡아 결론까지 토론합니다.'}</div></>}
       {notice&&<div className="toast">{notice}</div>}
       <section className={`panes ${active==='all'?'grid':'single'}`}>
         {SERVICES.map(s=><article key={s.id} className={active!=='all'&&active!==s.id?'hidden':'pane'}>
