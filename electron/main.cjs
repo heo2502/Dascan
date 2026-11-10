@@ -2,36 +2,10 @@ const { app, BrowserWindow, WebContentsView, ipcMain, session, shell } = require
 const path = require('path');
 const SERVICES=[{id:'chatgpt',url:'https://chatgpt.com/'},{id:'gemini',url:'https://gemini.google.com/app'},{id:'claude',url:'https://claude.ai/new'}];
 const views=new Map();
-
-function createAiViews(win){
-  for(const service of SERVICES){
-    const view=new WebContentsView({webPreferences:{partition:`persist:dascan-${service.id}`,contextIsolation:true,sandbox:true}});
-    views.set(service.id,view); win.contentView.addChildView(view); view.setVisible(false);
-    view.webContents.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36');
-    view.webContents.setWindowOpenHandler(({url})=>{shell.openExternal(url);return{action:'deny'}});
-    view.webContents.on('did-finish-load',()=>win.webContents.send('ai-ready',service.id));
-    view.webContents.loadURL(service.url);
-  }
-}
-
-function createWindow(){
-  const win=new BrowserWindow({width:1500,height:940,minWidth:980,minHeight:680,title:'다스캔',backgroundColor:'#f3f5f8',webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,sandbox:true}});
-  win.removeMenu();
-  if(process.argv.includes('--dev'))win.loadURL('http://localhost:5173'); else win.loadFile(path.join(__dirname,'..','dist','index.html'));
-  createAiViews(win);
-  win.on('closed',()=>views.clear());
-}
-
-ipcMain.on('layout-views',(_event,layouts)=>{
-  for(const[id,view]of views){
-    const item=layouts.find(x=>x.id===id);
-    if(!item){view.setVisible(false);continue}
-    view.setBounds({x:Math.round(item.x),y:Math.round(item.y),width:Math.max(1,Math.round(item.width)),height:Math.max(1,Math.round(item.height))});
-    view.setVisible(true);
-  }
-});
+function createAiViews(win){for(const service of SERVICES){const view=new WebContentsView({webPreferences:{partition:`persist:dascan-${service.id}`,contextIsolation:true,sandbox:true}});views.set(service.id,view);win.contentView.addChildView(view);view.setVisible(false);view.webContents.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36');view.webContents.setWindowOpenHandler(({url})=>{shell.openExternal(url);return{action:'deny'}});view.webContents.on('did-finish-load',()=>win.webContents.send('ai-ready',service.id));view.webContents.loadURL(service.url)}}
+function createWindow(){const win=new BrowserWindow({width:1500,height:940,minWidth:980,minHeight:680,title:'다스캔',backgroundColor:'#f3f5f8',webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,sandbox:true}});win.removeMenu();if(process.argv.includes('--dev'))win.loadURL('http://localhost:5173');else win.loadFile(path.join(__dirname,'..','dist','index.html'));createAiViews(win);win.on('closed',()=>views.clear())}
+ipcMain.on('layout-views',(_event,layouts)=>{for(const[id,view]of views){const item=layouts.find(x=>x.id===id);if(!item){view.setVisible(false);continue}view.setBounds({x:Math.round(item.x),y:Math.round(item.y),width:Math.max(1,Math.round(item.width)),height:Math.max(1,Math.round(item.height))});view.setVisible(true)}});
 ipcMain.handle('send-prompt',async(_event,{id,script})=>{const view=views.get(id);if(!view)return{ok:false,error:'서비스를 찾지 못했습니다.'};try{return await view.webContents.executeJavaScript(script,true)}catch(e){return{ok:false,error:e.message}}});
 ipcMain.on('reload-ai',(_event,id)=>views.get(id)?.webContents.reload());
-
 app.whenReady().then(()=>{session.defaultSession.setPermissionRequestHandler((_wc,p,cb)=>cb(['media','clipboard-read','clipboard-sanitized-write','notifications'].includes(p)));createWindow();app.on('activate',()=>{if(BrowserWindow.getAllWindows().length===0)createWindow()})});
 app.on('window-all-closed',()=>{if(process.platform!=='darwin')app.quit()});

@@ -50,15 +50,8 @@ function App(){
 
   useEffect(()=>window.dascan?.onReady(id=>setStatuses(v=>({...v,[id]:'준비'}))),[]);
   useLayoutEffect(()=>{
-    const update=()=>{
-      const layouts=SERVICES.flatMap(s=>{
-        const el=refs.current[s.id];
-        if(!el||el.offsetParent===null)return[];
-        const r=el.getBoundingClientRect(); return [{id:s.id,x:r.x,y:r.y,width:r.width,height:r.height}];
-      });
-      window.dascan?.layout(layouts);
-    };
-    update(); const observer=new ResizeObserver(update); observer.observe(document.body); window.addEventListener('resize',update);
+    const update=()=>window.dascan?.layout(SERVICES.flatMap(s=>{const el=refs.current[s.id];if(!el||el.offsetParent===null)return[];const r=el.getBoundingClientRect();return[{id:s.id,x:r.x,y:r.y,width:r.width,height:r.height}]}));
+    update();const observer=new ResizeObserver(update);observer.observe(document.body);window.addEventListener('resize',update);
     return()=>{observer.disconnect();window.removeEventListener('resize',update);window.dascan?.layout([])};
   },[active,mode]);
 
