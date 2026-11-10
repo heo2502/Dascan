@@ -18,9 +18,9 @@ const editorSelectors = {
   claude: ['div.ProseMirror[contenteditable="true"]', 'div[contenteditable="true"]', 'textarea'],
 };
 const answerSelectors = {
-  chatgpt: ['[data-message-author-role="assistant"]'],
-  gemini: ['model-response .model-response-text', 'model-response', '.response-container-content', '[data-test-id="model-response"]'],
-  claude: ['[data-testid="assistant-message"]', '.font-claude-response-body', '[data-is-streaming] .prose', 'div.prose'],
+  chatgpt: ['[data-message-author-role="assistant"]', 'article[data-testid^="conversation-turn"] .markdown'],
+  gemini: ['model-response .model-response-text', 'model-response message-content', 'model-response', '.response-container-content', '.markdown-main-panel', '[data-test-id="model-response"]'],
+  claude: ['[data-testid="assistant-message"] .prose', '[data-testid="assistant-message"]', '.font-claude-response-body', '[data-is-streaming] .prose', '[data-test-render-count] .prose', 'div.prose'],
 };
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -70,21 +70,46 @@ async function latestAnswer(id) {
   return view.webContents.executeJavaScript(`(() => { const selectors=${JSON.stringify(answerSelectors[id] || [])}; const visible=e=>e&&e.offsetParent!==null; for(const selector of selectors){const items=[...document.querySelectorAll(selector)].filter(visible).map(e=>(e.innerText||e.textContent||'').trim()).filter(t=>t.length>10);if(items.length)return items.at(-1)} return '' })()`, true);
 }
 
-async function waitForAnswer(id, before = '', timeoutMs = 120000) {
+async function pageText(id) {
+  const view = views.get(id);
+  if (!view) return '';
+  return view.webContents.executeJavaScript(`document.body ? document.body.innerText : ''`, true);
+}
+
+async function isGenerating(id) {
+  const view = views.get(id);
+  if (!view) return false;
+  return view.webContents.executeJavaScript(`(() => [...document.querySelectorAll('button,[role="button"]')].some(e => e.offsetParent!==null && /stop|중지|생성 중단|응답 중지/i.test((e.getAttribute('aria-label')||'')+' '+(e.title||'')+' '+(e.innerText||''))))()`, true);
+}
+
+function pageDifference(before, current, prompt) {
+  const normalize = text => text.split('\n').map(line => line.trim()).filter(line => line.length > 2);
+  const beforeLines = new Set(normalize(before));
+  const promptLines = new Set(normalize(prompt));
+  const ignored = /^(보내기|전송|공유|복사|좋아요|싫어요|다시 시도|ChatGPT|Gemini|Claude|새 채팅|메뉴)$/i;
+  const added = normalize(current).filter(line => !beforeLines.has(line) && !promptLines.has(line) && !ignored.test(line));
+  return [...new Set(added)].join('\n').slice(-8000);
+}
+
+async function waitForAnswer(id, baseline, prompt, timeoutMs = 150000) {
   const started = Date.now();
   let last = ''; let stable = 0;
   while (Date.now() - started < timeoutMs) {
     if (debateCancelled) throw new Error('토론이 중지되었습니다.');
     await wait(2000);
-    const current = await latestAnswer(id);
-    if (current && current !== before && current.length > 20) {
+    const selected = await latestAnswer(id);
+    const fallback = pageDifference(baseline.page, await pageText(id), prompt);
+    const current = selected && selected !== baseline.answer ? selected : fallback;
+    if (current && current !== baseline.answer && current.length > 40) {
       if (current === last) stable += 1; else stable = 0;
-      last = current;
-      if (stable >= 2) return current;
+      last = current.trim();
+      if (stable >= 2 && !(await isGenerating(id))) return current;
     }
   }
   throw new Error(`${id}의 답변 대기 시간이 초과되었습니다.`);
 }
+
+async function baseline(id) { return { answer: await latestAnswer(id), page: await pageText(id) }; }
 
 function progress(payload) { mainWindow?.webContents.send('debate-progress', payload); }
 
@@ -92,40 +117,48 @@ async function runDebate(topic, maxRounds) {
   debateCancelled = false;
   const history = [];
   progress({ state: 'running', round: 1, message: '1라운드: 찬성·반대의 첫 주장을 요청합니다.' });
-  const beforePro = await latestAnswer('chatgpt');
-  const beforeCon = await latestAnswer('gemini');
+  const beforePro = await baseline('chatgpt');
+  const beforeCon = await baseline('gemini');
+  const proOpening = `당신은 실제 토론의 찬성 측 토론자입니다. 주제: “${topic}”\n이 토론은 여러 라운드로 진행됩니다. 지금은 결론을 내리지 말고, 명확한 입장과 근거·사례·예상 반론을 포함한 500자 안팎의 첫 주장을 하세요. 상대를 존중하되 논리적으로 설득하세요.`;
+  const conOpening = `당신은 실제 토론의 반대 측 토론자입니다. 주제: “${topic}”\n이 토론은 여러 라운드로 진행됩니다. 지금은 결론을 내리지 말고, 명확한 입장과 근거·사례·예상 반론을 포함한 500자 안팎의 첫 주장을 하세요. 상대를 존중하되 논리적으로 설득하세요.`;
   const [sentPro, sentCon] = await Promise.all([
-    sendPrompt('chatgpt', `당신은 실제 토론의 찬성 측 토론자입니다. 주제: “${topic}”\n명확한 입장을 밝히고 근거·사례·예상되는 반론을 포함해 500자 안팎의 첫 주장을 하세요. 상대를 존중하되 논리적으로 설득하세요.`),
-    sendPrompt('gemini', `당신은 실제 토론의 반대 측 토론자입니다. 주제: “${topic}”\n명확한 입장을 밝히고 근거·사례·예상되는 반론을 포함해 500자 안팎의 첫 주장을 하세요. 상대를 존중하되 논리적으로 설득하세요.`),
+    sendPrompt('chatgpt', proOpening),
+    sendPrompt('gemini', conOpening),
   ]);
   if (!sentPro.ok || !sentCon.ok) throw new Error(`토론자 입력 실패: ${sentPro.error || sentCon.error}`);
-  const [proFirst, conFirst] = await Promise.all([waitForAnswer('chatgpt', beforePro), waitForAnswer('gemini', beforeCon)]);
+  progress({ state: 'running', round: 1, message: 'ChatGPT와 Gemini의 첫 주장이 끝나기를 기다립니다.' });
+  const [proFirst, conFirst] = await Promise.all([waitForAnswer('chatgpt', beforePro, proOpening), waitForAnswer('gemini', beforeCon, conOpening)]);
   history.push({ round: 1, pro: proFirst, con: conFirst });
 
   for (let round = 1; round <= maxRounds; round += 1) {
     progress({ state: 'running', round, message: `${round}라운드: 사회자가 양측 주장을 판정합니다.` });
     const current = history.at(-1);
-    const beforeMod = await latestAnswer('claude');
+    const beforeMod = await baseline('claude');
     const forceConclusion = round === maxRounds;
-    const moderatorPrompt = `당신은 실제 공개토론의 공정한 사회자입니다.\n주제: “${topic}”\n현재 ${round}라운드 찬성 발언:\n${current.pro}\n\n현재 ${round}라운드 반대 발언:\n${current.con}\n\n양측의 핵심 근거, 직접 충돌하는 쟁점, 논리적 강점과 약점을 구체적으로 평가하세요. ${forceConclusion ? '최대 라운드이므로 반드시 최종 결론을 내려야 합니다.' : '결론을 내릴 만큼 논거가 충분하거나 합의점이 생겼다면 최종 결론을 내리고, 아직 핵심 쟁점이 남았다면 다음 라운드 질문을 제시하세요.'}\n결론을 내리면 맨 첫 줄에 [토론 종료]를, 계속하면 [토론 계속]을 쓰세요. 종료 시에는 승패보다 조건부 결론, 남은 불확실성, 실제 사람이 취할 합리적인 선택을 포함하세요.`;
+    const mayConclude = round >= 2;
+    const moderatorPrompt = `당신은 찬성이나 반대 입장이 아닌 실제 공개토론의 공정한 사회자입니다. 자신의 의견을 주장하지 마세요.\n주제: “${topic}”\n현재 ${round}라운드 찬성 발언:\n${current.pro}\n\n현재 ${round}라운드 반대 발언:\n${current.con}\n\n양측의 핵심 근거를 각각 정확히 요약하고, 직접 충돌하는 쟁점, 논리적 강점과 약점을 구체적으로 평가하세요. ${forceConclusion ? '최대 라운드이므로 반드시 최종 결론을 내려야 합니다.' : mayConclude ? '논거가 충분하거나 합의점이 생겼다면 최종 결론을 내리고, 아직 핵심 쟁점이 남았다면 양측에 다음 라운드 질문을 하나씩 제시하세요.' : '첫 라운드이므로 결론을 내리지 말고, 반드시 양측에 구체적인 재반박 질문을 하나씩 제시하세요.'}\n${mayConclude || forceConclusion ? '결론을 내리면 맨 첫 줄에 [토론 종료]를, 계속하면 [토론 계속]을 쓰세요.' : '맨 첫 줄에 반드시 [토론 계속]이라고 쓰세요.'} 종료 시에는 승패보다 조건부 결론, 남은 불확실성, 실제 사람이 취할 합리적인 선택을 포함하세요.`;
     const sentMod = await sendPrompt('claude', moderatorPrompt);
     if (!sentMod.ok) throw new Error(`사회자 입력 실패: ${sentMod.error}`);
-    const moderator = await waitForAnswer('claude', beforeMod);
+    progress({ state: 'running', round, message: `Claude 사회자의 ${round}라운드 평가를 기다립니다.` });
+    const moderator = await waitForAnswer('claude', beforeMod, moderatorPrompt);
     current.moderator = moderator;
-    if (/\[토론\s*종료\]/.test(moderator) || forceConclusion) {
+    if ((round >= 2 && /\[토론\s*종료\]/.test(moderator)) || forceConclusion) {
       progress({ state: 'complete', round, message: `${round}라운드에서 사회자가 최종 결론을 내렸습니다.`, history });
       return { ok: true, rounds: round, history };
     }
 
     progress({ state: 'running', round: round + 1, message: `${round + 1}라운드: 양측이 상대 주장과 사회자 질문에 재반박합니다.` });
-    const beforeNextPro = await latestAnswer('chatgpt');
-    const beforeNextCon = await latestAnswer('gemini');
+    const beforeNextPro = await baseline('chatgpt');
+    const beforeNextCon = await baseline('gemini');
+    const proRebuttal = `토론 주제: “${topic}”\n당신은 계속 찬성 측입니다. 상대(반대 측)의 직전 발언:\n${current.con}\n\n사회자의 평가와 찬성 측 질문:\n${moderator}\n\n상대의 가장 강한 근거를 먼저 정확히 요약한 뒤 직접 반박하세요. 자신의 직전 주장을 반복하거나 독자적인 최종 결론을 내리지 마세요. 자신의 약점 하나를 인정하고 새로운 보완 논거를 포함해 500자 안팎으로 답하세요.`;
+    const conRebuttal = `토론 주제: “${topic}”\n당신은 계속 반대 측입니다. 상대(찬성 측)의 직전 발언:\n${current.pro}\n\n사회자의 평가와 반대 측 질문:\n${moderator}\n\n상대의 가장 강한 근거를 먼저 정확히 요약한 뒤 직접 반박하세요. 자신의 직전 주장을 반복하거나 독자적인 최종 결론을 내리지 마세요. 자신의 약점 하나를 인정하고 새로운 보완 논거를 포함해 500자 안팎으로 답하세요.`;
     const [nextProSent, nextConSent] = await Promise.all([
-      sendPrompt('chatgpt', `토론 주제: “${topic}”\n상대(반대 측)의 직전 발언:\n${current.con}\n\n사회자의 평가와 질문:\n${moderator}\n\n실제 토론자처럼 상대의 가장 강한 근거를 먼저 정확히 요약한 뒤 반박하세요. 자신의 약점도 하나 인정하고 보완 논거를 제시하세요. 새로운 근거를 포함해 500자 안팎으로 답하세요.`),
-      sendPrompt('gemini', `토론 주제: “${topic}”\n상대(찬성 측)의 직전 발언:\n${current.pro}\n\n사회자의 평가와 질문:\n${moderator}\n\n실제 토론자처럼 상대의 가장 강한 근거를 먼저 정확히 요약한 뒤 반박하세요. 자신의 약점도 하나 인정하고 보완 논거를 제시하세요. 새로운 근거를 포함해 500자 안팎으로 답하세요.`),
+      sendPrompt('chatgpt', proRebuttal),
+      sendPrompt('gemini', conRebuttal),
     ]);
     if (!nextProSent.ok || !nextConSent.ok) throw new Error(`재반박 입력 실패: ${nextProSent.error || nextConSent.error}`);
-    const [nextPro, nextCon] = await Promise.all([waitForAnswer('chatgpt', beforeNextPro), waitForAnswer('gemini', beforeNextCon)]);
+    progress({ state: 'running', round: round + 1, message: `ChatGPT와 Gemini의 ${round + 1}라운드 재반박을 기다립니다.` });
+    const [nextPro, nextCon] = await Promise.all([waitForAnswer('chatgpt', beforeNextPro, proRebuttal), waitForAnswer('gemini', beforeNextCon, conRebuttal)]);
     history.push({ round: round + 1, pro: nextPro, con: nextCon });
   }
   return { ok: true, rounds: maxRounds, history };
