@@ -1,6 +1,6 @@
 {
   "name": "dascan",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "다스캔 - 여러 AI를 한 화면에서 질문하고 비교하는 데스크톱 앱",
   "author": "Dascan",
@@ -29,8 +29,9 @@
     "productName": "다스캔",
     "asar": true,
     "files": ["dist/**/*", "electron/**/*", "package.json"],
+    "extraMetadata": { "publisher": "Dascan" },
     "directories": { "output": "release" },
     "win": { "target": ["nsis"], "artifactName": "Dascan-Setup-${version}-${arch}.${ext}" },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true }
+    "nsis": { "oneClick": false, "perMachine": true, "allowElevation": true, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "createStartMenuShortcut": true, "shortcutName": "다스캔", "uninstallDisplayName": "다스캔 ${version}", "include": "build/installer.nsh", "deleteAppDataOnUninstall": false }
   }
 }

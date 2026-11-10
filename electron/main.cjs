@@ -1,5 +1,7 @@
-const { app, BrowserWindow, WebContentsView, ipcMain, session } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, session, dialog } = require('electron');
 const path = require('path');
+const fs = require('fs');
+const { spawn } = require('child_process');
 
 const SERVICES = [
   { id: 'chatgpt', url: 'https://chatgpt.com/' },
@@ -134,6 +136,20 @@ ipcMain.handle('send-prompt', (_event, { id, text }) => sendPrompt(id, text));
 ipcMain.handle('start-debate', async (_event, { topic, maxRounds }) => { try { return await runDebate(topic, Math.min(5, Math.max(2, Number(maxRounds) || 3))); } catch (error) { progress({ state: 'error', message: error.message }); return { ok: false, error: error.message }; } });
 ipcMain.on('cancel-debate', () => { debateCancelled = true; });
 ipcMain.on('reload-ai', (_event, id) => views.get(id)?.webContents.reload());
+ipcMain.handle('request-uninstall', async () => {
+  const candidates = [
+    path.join(path.dirname(process.execPath), 'Uninstall 다스캔.exe'),
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'dascan', 'Uninstall 다스캔.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'dascan', 'Uninstall 다스캔.exe'),
+  ];
+  const uninstaller = candidates.find(candidate => candidate && fs.existsSync(candidate));
+  if (!uninstaller) return { ok: false, error: '제거 프로그램을 찾지 못했습니다. 새 설치 파일로 다시 설치한 뒤 제거해 주세요.' };
+  const result = await dialog.showMessageBox(mainWindow, { type: 'warning', buttons: ['취소', '프로그램 제거'], defaultId: 0, cancelId: 0, title: '다스캔 제거', message: '다스캔을 이 컴퓨터에서 제거할까요?', detail: 'AI 서비스 로그인 정보는 별도의 사용자 데이터 폴더에 남을 수 있습니다.' });
+  if (result.response !== 1) return { ok: false, cancelled: true };
+  spawn(uninstaller, [], { detached: true, stdio: 'ignore' }).unref();
+  setTimeout(() => app.quit(), 500);
+  return { ok: true };
+});
 
 app.whenReady().then(() => { session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => callback(['media', 'clipboard-read', 'clipboard-sanitized-write', 'notifications'].includes(permission))); createWindow(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); }); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

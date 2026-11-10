@@ -73,7 +73,7 @@ function App(){
     <aside className="rail">
       <div className="brand">D</div>
       {MODES.map(m=><button key={m.id} className={mode===m.id?'railbtn active':'railbtn'} title={m.label} onClick={()=>{setMode(m.id);setActive('all')}}><span>{m.icon}</span></button>)}
-      <div className="spacer"/><button className="railbtn" title="도움말" onClick={()=>setNotice('각 AI에 먼저 로그인한 뒤 상단 입력창에서 질문하세요.')}>?</button>
+      <div className="spacer"/><button className="railbtn danger" title="프로그램 제거" onClick={async()=>{const result=await window.dascan.uninstall();if(!result.ok&&!result.cancelled)setNotice(result.error)}}>🗑</button><button className="railbtn" title="도움말" onClick={()=>setNotice('각 AI에 먼저 로그인한 뒤 상단 입력창에서 질문하세요.')}>?</button>
     </aside>
     <main>
       <header className="tabs">
