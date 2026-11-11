@@ -51,22 +51,31 @@ async function sendPrompt(id, text) {
   const view = views.get(id);
   if (!view) return { ok: false, error: '서비스를 찾지 못했습니다.' };
   try {
+    if (id === 'gemini') view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
     const focused = await view.webContents.executeJavaScript(`(() => { const selectors=${JSON.stringify(editorSelectors[id] || [])}; const visible=e=>e&&e.offsetParent!==null&&!e.disabled; let el; for(const selector of selectors){el=[...document.querySelectorAll(selector)].find(visible);if(el)break} if(!el)return false; el.focus(); if(el.tagName==='TEXTAREA'||el.tagName==='INPUT'){el.select()}else{const range=document.createRange();range.selectNodeContents(el);const selection=getSelection();selection.removeAllRanges();selection.addRange(range)} return true })()`, true);
     if (!focused) return { ok: false, error: '입력창을 찾지 못했습니다. 로그인을 확인하세요.' };
     view.webContents.insertText(text);
     await wait(300);
-    const clicked = await view.webContents.executeJavaScript(`(() => { const visible=e=>e&&e.offsetParent!==null&&!e.disabled; const selectors=['button[data-testid="send-button"]','button[aria-label*="Send"]','button[aria-label*="send"]','button[aria-label*="보내기"]','button[aria-label*="전송"]','button[type="submit"]']; for(const selector of selectors){const button=[...document.querySelectorAll(selector)].find(visible);if(button){button.click();return true}} return false })()`, true);
-    if (!clicked) {
-      view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'ENTER' });
-      view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'ENTER' });
+    let clicked = false;
+    if (id === 'gemini') {
+      view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+      view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
+    } else {
+      clicked = await view.webContents.executeJavaScript(`(() => { const visible=e=>e&&e.offsetParent!==null&&!e.disabled; const selectors=['button[data-testid="send-button"]','button[aria-label*="Send"]','button[aria-label*="send"]','button[aria-label*="보내기"]','button[aria-label*="전송"]','button[type="submit"]']; for(const selector of selectors){const button=[...document.querySelectorAll(selector)].find(visible);if(button){button.click();return true}} return false })()`, true);
+      if (!clicked) {
+        view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+        view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
+      }
     }
     await wait(500);
     const stillFilled = await view.webContents.executeJavaScript(`(() => { const selectors=${JSON.stringify(editorSelectors[id] || [])}; const visible=e=>e&&e.offsetParent!==null&&!e.disabled; for(const selector of selectors){const el=[...document.querySelectorAll(selector)].find(visible);if(el){return ((el.value||el.innerText||el.textContent||'').trim().length>20)}} return false })()`, true);
     if (stillFilled) {
-      view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'ENTER' });
-      view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'ENTER' });
+      if (id === 'gemini') view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+      await view.webContents.executeJavaScript(`(() => { const selectors=${JSON.stringify(editorSelectors[id] || [])}; const visible=e=>e&&e.offsetParent!==null&&!e.disabled; for(const selector of selectors){const el=[...document.querySelectorAll(selector)].find(visible);if(el){el.focus();return true}} return false })()`, true);
+      view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+      view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
     }
-    return { ok: true, sent: true, method: clicked ? 'button' : 'enter' };
+    return { ok: true, sent: true, method: id === 'gemini' ? 'gemini-enter' : clicked ? 'button' : 'enter' };
   } catch (error) { return { ok: false, error: error.message }; }
 }
 
